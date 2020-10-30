@@ -17,11 +17,11 @@ from sklearn.ensemble import RandomForestClassifier
 def checkDevice():
     return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-
+"""
 def refineResults(X_train, y_train, X_test):
     clf = MultiOutputClassifier(RandomForestClassifier(n_estimators = 5), n_jobs=-1).fit(X, y)
     return clf.predict(X_test)
-    
+"""   
 
 
 #Dataset class
@@ -236,7 +236,7 @@ model = train(X, y,
     
 X_test = preprocess_data(test_features)
 preds = predict(model, X_test, BATCH_SIZE)
-preds_refined = refineResults(X, y, X_test)
+#preds_refined = refineResults(X, y, X_test)
 ss.iloc[:, 0] =  test_features.iloc[:,0]
-ss.iloc[:, 1:] = preds_refined
+ss.iloc[:, 1:] = preds
 ss.to_csv('./kaggle/working/submission.csv', index=False, float_format='%15f')
