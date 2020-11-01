@@ -8,10 +8,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import time
-from models import Model1 as Model
-from models import Model1_PARAMS as PARAMS
-from sklearn.multioutput import MultiOutputClassifier
-from sklearn.ensemble import RandomForestClassifier
+from models import Model4 as Model
+from models import Model4_PARAMS as PARAMS
+
+
+def getClassWeights(y_train):
+    number_each_class = y_train.loc[1:,:].to_numpy().sum(axis = 0)
+    max_class = number_each_class.max()
+    weights = max_class / number_each_class 
+    return torch.tensor(weights).unsqueeze(0).to(checkDevice())
 
 #Check if GPU or CPU
 def checkDevice():
@@ -23,6 +28,12 @@ def refineResults(X_train, y_train, X_test):
     return clf.predict(X_test)
 """   
 
+def filter_preds(predictions):
+    top_indices = (-predictions).argsort(axis = 1)[:, :150]
+    zeros = np.zeros(predictions.shape)
+    for i in range(zeros.shape[0]):
+        zeros[i, top_indices[i,:]] = predictions[i, top_indices[i,:]]
+    return zeros
 
 #Dataset class
 class TrainDataset:
@@ -68,6 +79,22 @@ def train_epoch(model, optimizer, scheduler, loss_fn, dataloader):
     final_loss /= len(dataloader)
     return final_loss
 
+
+def filtered_valid_BCE(model, dataloader):
+    device = checkDevice()
+    model.eval()
+    final_loss = 0
+    loss_fn = nn.BCELoss()
+    for data in dataloader:
+        inputs, targets = data['x'].to(device), data['y'].to(device)
+        outputs = model(inputs).sigmoid()
+        filtered = torch.tensor(filter_preds(outputs.detach().cpu().numpy()), dtype=torch.float32).to(device)
+        loss = loss_fn(filtered, targets.astype(torch.float32))
+        final_loss += loss.item()
+    final_loss /= len(dataloader)
+    return final_loss
+        
+    
 #Compute validation loss
 def valid_fn(model, loss_fn, dataloader):
     device = checkDevice()
@@ -78,8 +105,8 @@ def valid_fn(model, loss_fn, dataloader):
     for data in dataloader:
         inputs, targets = data['x'].to(device), data['y'].to(device)
         outputs = model(inputs)
-        loss = loss_fn(outputs, targets)
         
+        loss = loss_fn(outputs, targets)
         final_loss += loss.item()
         valid_preds.append(outputs.sigmoid().detach().cpu().numpy())
         
@@ -105,7 +132,7 @@ def inference_fn(model, dataloader, device):
 def train(X_train, y_train,
           batch_size, num_features, num_targets,
           learning_rate, weight_decay, hidden_size,
-          epochs, fold_id,  X_valid = None, y_valid = None):
+          epochs, fold_id,  X_valid = None, y_valid = None, filter_p = False):
     
     device = checkDevice()
     train_dataset = TrainDataset(X_train, y_train)
@@ -123,6 +150,7 @@ def train(X_train, y_train,
         num_features=num_features,
         num_targets=num_targets,
         hidden_size=hidden_size,
+        weights = getClassWeights(y_train)
     )
     
     model.to(device)
@@ -143,7 +171,10 @@ def train(X_train, y_train,
         print("Epoch: {}  |  Train Loss: {:.5f}  |  Time Elapsed: {:.2f}  |"
               .format(epoch, train_loss, end - start))
         if (( X_valid is not None) and (y_valid is not None)):
-            valid_loss, valid_preds = valid_fn(model, model.valid_fn, validloader)
+            if filter_p:
+                valid_loss = filtered_valid_BCE(model, validloader)
+            else:
+                valid_loss, _ = valid_fn(model, model.valid_fn, validloader)
             print("Epoch: {}  |  Test Score: {:.5f}  |".format(epoch, valid_loss))
                 
     if (( X_valid is None) or (y_valid is None)):
@@ -207,6 +238,7 @@ BATCH_SIZE = PARAMS["BATCH_SIZE"]
 LEARNING_RATE = PARAMS["LEARNING_RATE"]
 WEIGHT_DECAY = PARAMS["WEIGHT_DECAY"]
 NFOLDS = 5
+FILTER = False
 
 X, y = preprocess_data(train_features, train_targets)
 
@@ -225,7 +257,7 @@ for i in range(NFOLDS):
                  BATCH_SIZE, num_features, 
                  num_targets, LEARNING_RATE, 
                  WEIGHT_DECAY, hidden_size, 
-                 EPOCHS, FOLD_ID, X_valid, y_valid)
+                 EPOCHS, FOLD_ID, X_valid, y_valid, FILTER)
 
 #Train on train+valid and predict test --> write to submission.csv   
 model = train(X, y, 
@@ -236,6 +268,8 @@ model = train(X, y,
     
 X_test = preprocess_data(test_features)
 preds = predict(model, X_test, BATCH_SIZE)
+if FILTER:
+    preds = filter_preds(preds.cpu().numpy())
 #preds_refined = refineResults(X, y, X_test)
 ss.iloc[:, 0] =  test_features.iloc[:,0]
 ss.iloc[:, 1:] = preds

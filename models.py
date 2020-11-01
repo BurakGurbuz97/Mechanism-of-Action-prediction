@@ -1,11 +1,21 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torch
 
+
+class WeightedMultilabel(torch.nn.Module):
+    def __init__(self, weights: torch.Tensor):
+        super(WeightedMultilabel, self).__init__()
+        self.loss = torch.nn.BCEWithLogitsLoss(reduction= "none")
+        self.weights = weights
+
+    def forward(self, outputs, targets):
+        return torch.mean(self.loss(outputs, targets) * self.weights)
 
 Model1_PARAMS = {
-    "EPOCHS": 20,
-    "BATCH_SIZE": 256,
+    "EPOCHS": 30,
+    "BATCH_SIZE": 512,
     "LEARNING_RATE": 1e-3,
     "WEIGHT_DECAY": 1e-5
     }
@@ -31,11 +41,11 @@ class Model1(nn.Module):
     def forward(self, x):
         x = self.batch_norm1(x)
         x = self.dropout1(x)
-        x = F.relu(self.dense1(x))
+        x = F.leaky_relu(self.dense1(x))
         
         x = self.batch_norm2(x)
         x = self.dropout2(x)
-        x = F.relu(self.dense2(x))
+        x = F.leaky_relu(self.dense2(x))
         
         x = self.batch_norm3(x)
         x = self.dropout3(x)
@@ -102,3 +112,89 @@ class Model2(nn.Module):
         x = self.dense5(x)
         
         return x    
+    
+    
+Model3_PARAMS = {
+    "EPOCHS": 30,
+    "BATCH_SIZE": 500,
+    "LEARNING_RATE": 1e-3,
+    "WEIGHT_DECAY": 1e-5
+    }
+
+class Model3(nn.Module):
+    def __init__(self, num_features, num_targets, hidden_size):
+        super(Model3, self).__init__()
+        
+        self.loss_fn = nn.BCEWithLogitsLoss()
+        self.valid_fn = nn.BCEWithLogitsLoss()
+        
+        self.batch_norm1 = nn.BatchNorm1d(num_features)
+        self.dropout1 = nn.Dropout(0.5)
+        self.dense1 = nn.utils.weight_norm(nn.Linear(num_features, 512))
+        
+        self.batch_norm2 = nn.BatchNorm1d(512)
+        self.dropout2 = nn.Dropout(0.5)
+        self.dense2 = nn.utils.weight_norm(nn.Linear(512, 512))
+        
+        self.batch_norm3 = nn.BatchNorm1d(1024)
+        self.dropout3 = nn.Dropout(0.5)
+        self.dense3 = nn.utils.weight_norm(nn.Linear(1024, num_targets))
+    
+    def forward(self, x):
+        x1 = self.batch_norm1(x)
+        x1 = self.dropout1(x1)
+        x1 = F.leaky_relu(self.dense1(x1))
+        
+        x2 = self.batch_norm2(x1)
+        x2 = self.dropout2(x2)
+        x2 = F.leaky_relu(self.dense2(x2))
+        
+        x1_x2 = torch.cat([x1, x2], dim = 1)
+
+        x3 = self.batch_norm3(x1_x2)
+        x3 = self.dropout3(x3)
+        x3 = self.dense3(x3)
+        
+        return x3
+    
+    
+Model4_PARAMS = {
+    "EPOCHS": 30,
+    "BATCH_SIZE": 512,
+    "LEARNING_RATE": 1e-3,
+    "WEIGHT_DECAY": 1e-5
+    }
+    
+class Model4(nn.Module):
+    def __init__(self, num_features, num_targets, hidden_size, weights = None):
+        super(Model4, self).__init__()
+        
+        self.loss_fn = WeightedMultilabel(weights)
+        self.valid_fn = nn.BCEWithLogitsLoss()
+        self.batch_norm1 = nn.BatchNorm1d(num_features)
+        self.dropout1 = nn.Dropout(0.2)
+        self.dense1 = nn.utils.weight_norm(nn.Linear(num_features, hidden_size))
+        
+        self.batch_norm2 = nn.BatchNorm1d(hidden_size)
+        self.dropout2 = nn.Dropout(0.5)
+        self.dense2 = nn.utils.weight_norm(nn.Linear(hidden_size, hidden_size))
+        
+        self.batch_norm3 = nn.BatchNorm1d(hidden_size)
+        self.dropout3 = nn.Dropout(0.5)
+        self.dense3 = nn.utils.weight_norm(nn.Linear(hidden_size, num_targets))
+    
+    def forward(self, x):
+        x = self.batch_norm1(x)
+        x = self.dropout1(x)
+        x = F.relu(self.dense1(x))
+        
+        x = self.batch_norm2(x)
+        x = self.dropout2(x)
+        x = F.relu(self.dense2(x))
+        
+        x = self.batch_norm3(x)
+        x = self.dropout3(x)
+        x = self.dense3(x)
+        
+        return x
+    
